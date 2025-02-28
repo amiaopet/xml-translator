@@ -782,6 +782,32 @@ def load_translation_library(progress_callback=None):
                                         translation_cache[source_text] = translated_text
                                         xml_count += 1
                                         total_count += 1
+
+                # 6. 新增：处理PARA和PARAC内的子标签（如STDNAME）
+                for parent in tree.xpath("//*[child::PARA and child::PARAC]"):
+                    paras = parent.xpath("./PARA")
+                    paracs = parent.xpath("./PARAC")
+
+                    # 确保数量一致时才配对
+                    if len(paras) == len(paracs):
+                        for i in range(len(paras)):
+                            # 检查子元素
+                            para_children = list(paras[i])
+                            parac_children = list(paracs[i])
+
+                            # 如果子元素数量相同，尝试一一配对
+                            if len(para_children) == len(parac_children):
+                                for j in range(len(para_children)):
+                                    if para_children[j].text and parac_children[j].text:
+                                        source_text = para_children[j].text.strip()
+                                        translated_text = parac_children[j].text.strip()
+
+                                        # 检查是否为有效翻译对
+                                        if len(source_text) > 1 and len(translated_text) > 1 and has_chinese_characters(translated_text):
+                                            if source_text not in translation_cache:
+                                                translation_cache[source_text] = translated_text
+                                                xml_count += 1
+                                                total_count += 1
                 
                 # 进度更新
                 if progress_callback:
@@ -875,6 +901,7 @@ def translate_text(text):
                         {"source": "Procedure", "target": "程序"},
                         {"source": "Close-up", "target": "结束"},
                         {"source": "（NRC No.）：", "target": "（NRC 号码记录.）："}
+                        {"source": "clamp", "target": "卡箍"}
                     ]
                 }
             }
@@ -995,6 +1022,29 @@ def translate_xml_file(file_path, progress_callback=None):
         for titlec in xml_root.xpath("//TITLEC[not(../TITLE)]"):  # 将root改为xml_root
             translation_tasks.append((titlec, None))
             total_elements += 1
+
+        # 5. 处理PARA和PARAC中的子元素
+        for parent in xml_root.xpath("//*[child::PARA and child::PARAC]"):
+            paras = parent.xpath("./PARA")
+            paracs = parent.xpath("./PARAC")
+
+            min_count = min(len(paras), len(paracs))
+            for i in range(min_count):
+                para = paras[i]
+                parac = paracs[i]
+
+                # 如果PARA/PARAC本身没有文本但有子元素
+                if (not para.text or len(para.text.strip()) <= 1) and len(list(para)) > 0:
+                    para_children = list(para)
+                    parac_children = list(parac)
+
+                    # 如果子元素数量相同，尝试按顺序配对
+                    if len(para_children) == len(parac_children):
+                        for j in range(len(para_children)):
+                            if para_children[j].text and len(para_children[j].text.strip()) > 1:
+                                # 将子元素的文本内容作为翻译任务添加
+                                translation_tasks.append((para_children[j], parac_children[j]))
+                                total_elements += 1
         
         # 存储原始元素数量，将总元素数翻倍以包括尾部文本处理
         original_elements = total_elements
