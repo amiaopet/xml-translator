@@ -3,7 +3,7 @@ import os
 import threading
 import concurrent.futures
 import tkinter as tk
-from tkinter import messagebox, Listbox, Scrollbar, Button, Entry, Label, END, SINGLE, ttk, filedialog, Scale, IntVar, StringVar, Frame
+from tkinter import messagebox, Listbox, Scrollbar, Button, Entry, Label, END, SINGLE, ttk, filedialog, Scale, IntVar, StringVar, Frame, Text
 from lxml import etree
 from zhipuai import ZhipuAI
 from difflib import SequenceMatcher
@@ -18,6 +18,10 @@ import json
 
 # 默认API设置
 DEFAULT_API_KEY = "8214957676bb41e3bea675ab9b508cad.gV4qBe1HgCKrfSYA"
+# 添加自定义提示词默认设置
+DEFAULT_TEMPERATURE = 0.1
+DEFAULT_SYSTEM_PROMPT = "你是一名航空工程领域的专业翻译专家，具备以下专业资质：1. 航空航天工程专业博士学位 2. 10年航空技术文档翻译经验 3. 持有CATTI一级笔译证书 4. 熟悉AS9100航空质量标准体系。翻译要求：- 使用正式书面语，禁止口语化表达 - 严格遵循《航空工业术语标准》（HB 7715-2002）- 保持技术参数的绝对准确性 - 采用工程文档的规范表达方式。特殊翻译要求：- \"install\"必须翻译为\"拆下\" - \"clamp\"必须翻译为\"卡箍\" - \"discard\"必须翻译为\"报废\""
+DEFAULT_USER_PROMPT = "请将以下航空工程技术文本进行专业翻译，要求：1. 使用第三人称客观叙述2. 保留原始技术参数格式（如：RCS值应保持m²单位）3. 专业术语参照《英汉航空工程词典》（ISBN 978-7-118-05244-5），缩写翻译使用航空民航方向4. 句法结构符合技术文档规范(英译中)5.仅返回中文翻译结果，禁止添加任何前缀、注释或格式符号；即使原文疑似不完整，也必须直接翻译（例如let the应译为使；NRC NO翻译为NRC 号码记录），请仅输出翻译结果，仅输出翻译结果，仅输出翻译结果，不要添加任何解释性内容："
 # 配置文件路径
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".xml_translator_config.json")
 
@@ -51,7 +55,11 @@ def save_config():
         "directory": directory,
         "xml_library_dir": xml_library_dir,
         "min_match_threshold": min_match_threshold,
-        "threads": threads_var.get() if 'threads_var' in globals() else 8
+        "threads": threads_var.get() if 'threads_var' in globals() else 8,
+        # 添加新的配置项
+        "temperature": temperature_var.get() if 'temperature_var' in globals() else DEFAULT_TEMPERATURE,
+        "system_prompt": system_prompt_var.get() if 'system_prompt_var' in globals() else DEFAULT_SYSTEM_PROMPT,
+        "user_prompt": user_prompt_var.get() if 'user_prompt_var' in globals() else DEFAULT_USER_PROMPT
     }
     try:
         with open(CONFIG_FILE, 'w') as f:
@@ -65,6 +73,7 @@ def save_config():
 # 从文件加载配置
 def load_config():
     global directory, xml_library_dir, min_match_threshold, DEFAULT_API_KEY
+    global DEFAULT_TEMPERATURE, DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT
     if not os.path.exists(CONFIG_FILE):
         print(f"配置文件不存在: {CONFIG_FILE}")
         return False
@@ -80,6 +89,13 @@ def load_config():
             xml_library_dir = config["xml_library_dir"]
         if "min_match_threshold" in config:
             min_match_threshold = config["min_match_threshold"]
+        # 加载新增的配置项
+        if "temperature" in config:
+            DEFAULT_TEMPERATURE = config["temperature"]
+        if "system_prompt" in config:
+            DEFAULT_SYSTEM_PROMPT = config["system_prompt"]
+        if "user_prompt" in config:
+            DEFAULT_USER_PROMPT = config["user_prompt"]
         print("配置已从文件加载")
         return True
     except Exception as e:
@@ -877,20 +893,28 @@ def translate_text(text):
         return text
     
     try:
+        # 使用变量而非硬编码值
+        temperature = float(temperature_var.get()) if 'temperature_var' in globals() else DEFAULT_TEMPERATURE
+        system_prompt = system_prompt_var.get() if 'system_prompt_var' in globals() else DEFAULT_SYSTEM_PROMPT
+        user_prompt = user_prompt_var.get() if 'user_prompt_var' in globals() else DEFAULT_USER_PROMPT
+        
+        # 构建用户提示词
+        complete_user_prompt = f"{user_prompt}{text}"
+        
         # 使用智谱AI进行翻译
         completion = client.chat.completions.create(
             model="glm-4-flash",
             messages=[
                 {
                     "role": "system",
-                    "content": "你是一名航空工程领域的专业翻译专家，具备以下专业资质：1. 航空航天工程专业博士学位2. 10年航空技术文档翻译经验. 持有CATTI一级笔译证书4. 熟悉AS9100航空质量标准体系。翻译要求：- 使用正式书面语，禁止口语化表达- 严格遵循《航空工业术语标准》（HB 7715-2002）- 保持技术参数的绝对准确性- 采用工程文档的规范表达方式"
+                    "content": system_prompt
                 },
                 {
                     "role": "user",
-                    "content": f"请将以下航空工程技术文本进行专业翻译，要求：1. 使用第三人称客观叙述2. 保留原始技术参数格式（如：RCS值应保持m²单位）3. 专业术语参照《英汉航空工程词典》（ISBN 978-7-118-05244-5），缩写翻译使用航空民航方向4. 句法结构符合技术文档规范(英译中)5.仅返回中文翻译结果，禁止添加任何前缀、注释或格式符号；即使原文疑似不完整，也必须直接翻译（例如let the应译为使；NRC NO翻译为NRC 号码记录），请仅输出翻译结果，仅输出翻译结果，仅输出翻译结果，不要添加任何解释性内容：{text}"
+                    "content": complete_user_prompt
                 }
             ],
-            temperature=0.1,
+            temperature=temperature,
             extra_body={
                 "enable_enhancement": True,
                 "terminology": {
@@ -901,7 +925,6 @@ def translate_text(text):
                         {"source": "Procedure", "target": "程序"},
                         {"source": "Close-up", "target": "结束"},
                         {"source": "（NRC No.）：", "target": "（NRC 号码记录.）："}
-                        {"source": "clamp", "target": "卡箍"}
                     ]
                 }
             }
@@ -1434,6 +1457,40 @@ def show_api_settings():
     """显示API设置对话框"""
     api_settings_frame.pack(fill="x", padx=10, pady=10, after=frame_dirs)
 
+# 显示提示词设置界面
+def show_prompt_settings():
+    """显示提示词设置对话框"""
+    # 首先更新Text控件内容，确保显示最新值
+    system_prompt_text.delete("1.0", "end")
+    system_prompt_text.insert("1.0", system_prompt_var.get() if system_prompt_var.get() else DEFAULT_SYSTEM_PROMPT)
+    user_prompt_text.delete("1.0", "end")
+    user_prompt_text.insert("1.0", user_prompt_var.get() if user_prompt_var.get() else DEFAULT_USER_PROMPT)
+    # 显示设置框架
+    prompt_settings_frame.pack(fill="x", padx=10, pady=10, after=frame_dirs)
+
+# 保存提示词设置
+def save_prompt_settings():
+    # 从Text控件获取内容并保存到变量
+    system_prompt_var.set(system_prompt_text.get("1.0", "end-1c"))
+    user_prompt_var.set(user_prompt_text.get("1.0", "end-1c"))
+    
+    # 验证temperature是否在有效范围内
+    try:
+        temp = float(temperature_var.get())
+        if temp < 0 or temp > 1:
+            messagebox.showwarning("输入错误", "Temperature必须在0-1范围内。")
+            return
+    except:
+        messagebox.showwarning("输入错误", "Temperature必须是一个有效的数字。")
+        return
+    
+    # 保存配置
+    if save_config():
+        messagebox.showinfo("设置保存", "提示词设置已保存。")
+        prompt_settings_frame.pack_forget()
+    else:
+        messagebox.showerror("保存失败", "提示词设置保存失败。")
+
 def create_index():
     """手动创建或重建翻译索引"""
     global translation_matcher
@@ -1503,7 +1560,7 @@ api_status_label.pack(side="right", padx=5)
 frame_list = tk.Frame(root)
 frame_list.pack(fill="both", expand=True, padx=10, pady=5)
 
-file_listbox = Listbox(frame_list, selectmode=SINGLE, width=100, height=15)
+file_listbox = Listbox(frame_list, selectmode=SINGLE, width=100, height=10)
 file_listbox.pack(side="left", fill="both", expand=True)
 
 scrollbar = Scrollbar(frame_list, orient="vertical")
@@ -1536,6 +1593,9 @@ Button(frame_buttons, text="加载翻译库", command=load_library,
 Button(frame_buttons, text="创建索引", command=create_index, 
        width=15, height=2).pack(side="left", padx=5)
 Button(frame_buttons, text="API设置", command=show_api_settings, 
+       width=15, height=2).pack(side="left", padx=5)
+# 添加提示词设置按钮
+Button(frame_buttons, text="提示词设置", command=show_prompt_settings, 
        width=15, height=2).pack(side="left", padx=5)
 
 # 进度框架
@@ -1574,6 +1634,78 @@ Label(api_settings_frame, text="API设置", font=("Arial", 12, "bold"), bg="#f0f
 api_settings_frame = tk.Frame(root, relief="ridge", borderwidth=2, padx=10, pady=10, bg="#f0f0f0")
 
 Label(api_settings_frame, text="智谱AI设置", font=("Arial", 12, "bold"), bg="#f0f0f0").pack(anchor="w", pady=5)
+
+# 创建提示词设置框架 (初始不显示)
+prompt_settings_frame = tk.Frame(root, relief="ridge", borderwidth=2, bg="#f0f0f0")
+
+# 创建一个带滚动条的画布
+prompt_canvas = tk.Canvas(prompt_settings_frame, bg="#f0f0f0")
+prompt_scrollbar = tk.Scrollbar(prompt_settings_frame, orient="vertical", command=prompt_canvas.yview)
+prompt_scrollbar.pack(side="right", fill="y")
+prompt_canvas.pack(side="left", fill="both", expand=True)
+prompt_canvas.configure(yscrollcommand=prompt_scrollbar.set)
+
+# 添加鼠标滚轮支持
+def _on_mousewheel(event):
+    prompt_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+prompt_canvas.bind_all("<MouseWheel>", _on_mousewheel)  # Windows和macOS
+prompt_canvas.bind_all("<Button-4>", lambda e: prompt_canvas.yview_scroll(-1, "units"))  # Linux上滚
+prompt_canvas.bind_all("<Button-5>", lambda e: prompt_canvas.yview_scroll(1, "units"))   # Linux下滚
+
+# 创建一个Frame放在画布里，所有设置控件都放在这个Frame中
+prompt_inner_frame = tk.Frame(prompt_canvas, bg="#f0f0f0", padx=10, pady=10)
+prompt_canvas.create_window((0,0), window=prompt_inner_frame, anchor="nw")
+
+# 设置画布滚动区域
+def configure_scroll_region(event):
+    prompt_canvas.configure(scrollregion=prompt_canvas.bbox("all"))
+prompt_inner_frame.bind("<Configure>", configure_scroll_region)
+
+# 标题
+Label(prompt_inner_frame, text="提示词设置", font=("Arial", 12, "bold"), bg="#f0f0f0").pack(anchor="w", pady=5)
+
+# Temperature设置
+temperature_frame = Frame(prompt_inner_frame, bg="#f0f0f0")
+temperature_frame.pack(fill="x", pady=5)
+Label(temperature_frame, text="Temperature:", width=12, anchor="w", bg="#f0f0f0").pack(side="left", padx=5)
+temperature_var = StringVar(value=str(DEFAULT_TEMPERATURE))
+temperature_entry = Entry(temperature_frame, textvariable=temperature_var, width=10)
+temperature_entry.pack(side="left", padx=5)
+Label(temperature_frame, text="(取值范围: 0-1, 越低越精确，越高越创造性)", bg="#f0f0f0").pack(side="left", padx=5)
+
+# System Prompt设置
+system_prompt_frame = Frame(prompt_inner_frame, bg="#f0f0f0")
+system_prompt_frame.pack(fill="x", pady=5)
+Label(system_prompt_frame, text="System Prompt:", width=12, anchor="w", bg="#f0f0f0").pack(side="top", anchor="nw", padx=5, pady=2)
+system_prompt_var = StringVar(value=DEFAULT_SYSTEM_PROMPT)
+system_prompt_text = Text(system_prompt_frame, width=80, height=8, wrap="word")
+system_prompt_text.insert("1.0", DEFAULT_SYSTEM_PROMPT)
+system_prompt_text.pack(fill="x", padx=5, pady=2)
+
+# User Prompt设置
+user_prompt_frame = Frame(prompt_inner_frame, bg="#f0f0f0")
+user_prompt_frame.pack(fill="x", pady=5)
+Label(user_prompt_frame, text="User Prompt:", width=12, anchor="w", bg="#f0f0f0").pack(side="top", anchor="nw", padx=5, pady=2)
+user_prompt_var = StringVar(value=DEFAULT_USER_PROMPT)
+user_prompt_text = Text(user_prompt_frame, width=80, height=8, wrap="word")
+user_prompt_text.insert("1.0", DEFAULT_USER_PROMPT)
+user_prompt_text.pack(fill="x", padx=5, pady=2)
+
+# 提示词设置操作按钮
+prompt_buttons_frame = Frame(prompt_inner_frame, bg="#f0f0f0")
+prompt_buttons_frame.pack(fill="x", pady=10)
+Button(prompt_buttons_frame, text="保存", command=save_prompt_settings, 
+       bg="#4CAF50", fg="white", width=15).pack(side="left", padx=5)
+Button(prompt_buttons_frame, text="取消", command=lambda: prompt_settings_frame.pack_forget(), 
+       width=10).pack(side="left", padx=5)
+Button(prompt_buttons_frame, text="恢复默认值", command=lambda: [
+       temperature_var.set(str(0.1)),
+       system_prompt_text.delete("1.0", "end"),
+       system_prompt_text.insert("1.0", DEFAULT_SYSTEM_PROMPT),
+       user_prompt_text.delete("1.0", "end"),
+       user_prompt_text.insert("1.0", DEFAULT_USER_PROMPT)
+       ], width=15).pack(side="left", padx=5)
 
 # API Key设置
 api_key_frame = Frame(api_settings_frame, bg="#f0f0f0")
@@ -1621,7 +1753,19 @@ def delayed_load():
     # 更新UI以反映加载的配置
     if 'api_key_var' in globals():
         api_key_var.set(DEFAULT_API_KEY)
-    # ...
+    if 'temperature_var' in globals():
+        temperature_var.set(str(DEFAULT_TEMPERATURE))
+    if 'system_prompt_var' in globals():
+        system_prompt_var.set(DEFAULT_SYSTEM_PROMPT)
+    if 'user_prompt_var' in globals():
+        user_prompt_var.set(DEFAULT_USER_PROMPT)
+    # 更新文本控件
+    if 'system_prompt_text' in globals():
+        system_prompt_text.delete("1.0", "end")
+        system_prompt_text.insert("1.0", DEFAULT_SYSTEM_PROMPT)
+    if 'user_prompt_text' in globals():
+        user_prompt_text.delete("1.0", "end")
+        user_prompt_text.insert("1.0", DEFAULT_USER_PROMPT)
     
     # 然后加载翻译库
     status_label.config(text="正在加载翻译库...")
